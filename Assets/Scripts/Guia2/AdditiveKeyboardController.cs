@@ -1,8 +1,10 @@
 using UnityEngine;
+using UnityEngine.InputSystem;
 using UnityEngine.UI;
 
 // Clase controladora (front): traduce interacción del usuario (teclado de una
-// octava) en cambios sobre el oscilador. No calcula ninguna muestra de audio.
+// octava, por botones o por teclado fisico 1-12) en cambios sobre el
+// oscilador. No calcula ninguna muestra de audio.
 public class AdditiveKeyboardController : MonoBehaviour
 {
     public SimpleAdditiveOscillator oscillator;
@@ -14,12 +16,33 @@ public class AdditiveKeyboardController : MonoBehaviour
     };
     public int octave = 3;
 
+    // Fila superior del teclado fisico: 1 2 3 4 5 6 7 8 9 0 Q W, en el mismo
+    // orden que noteNames (12 teclas para las 12 notas de la octava).
+    private readonly Key[] noteKeys =
+    {
+        Key.Digit1, Key.Digit2, Key.Digit3, Key.Digit4, Key.Digit5, Key.Digit6,
+        Key.Digit7, Key.Digit8, Key.Digit9, Key.Digit0, Key.Q, Key.W
+    };
+
     void Start()
     {
         for (int i = 0; i < noteButtons.Length; i++)
         {
             int index = i;
             noteButtons[i].onClick.AddListener(() => PlayNote(noteNames[index]));
+        }
+    }
+
+    void Update()
+    {
+        if (Keyboard.current == null)
+            return;
+
+        int count = Mathf.Min(noteKeys.Length, noteNames.Length);
+        for (int i = 0; i < count; i++)
+        {
+            if (Keyboard.current[noteKeys[i]].wasPressedThisFrame)
+                PlayNote(noteNames[i]);
         }
     }
 
