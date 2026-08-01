@@ -16,6 +16,17 @@ public class AdditiveKeyboardController : MonoBehaviour
     };
     public int octave = 3;
 
+    // Botones de forma de onda (arriba del piano, como en la Guia 1).
+    public Button waveButtonSine;
+    public Button waveButtonSquare;
+    public Button waveButtonTriangle;
+    public Button waveButtonSawtooth;
+    public int presetHarmonicCount = 8;
+
+    // Recuerda que forma quedo cargada en modo aditivo, para saber si un
+    // segundo clic en el mismo boton debe pasar a la version directa.
+    private AdditiveWaveformType lastPresetShape = AdditiveWaveformType.Square;
+
     // Fila superior del teclado fisico: 1 2 3 4 5 6 7 8 9 0 Q W, en el mismo
     // orden que noteNames (12 teclas para las 12 notas de la octava).
     private readonly Key[] noteKeys =
@@ -30,6 +41,37 @@ public class AdditiveKeyboardController : MonoBehaviour
         {
             int index = i;
             noteButtons[i].onClick.AddListener(() => PlayNote(noteNames[index]));
+        }
+
+        if (waveButtonSine)
+            waveButtonSine.onClick.AddListener(() => oscillator.waveform = AdditiveWaveformType.Sine);
+
+        if (waveButtonSquare)
+            waveButtonSquare.onClick.AddListener(() => ToggleWaveform(AdditiveWaveformType.Square));
+
+        if (waveButtonTriangle)
+            waveButtonTriangle.onClick.AddListener(() => ToggleWaveform(AdditiveWaveformType.Triangle));
+
+        if (waveButtonSawtooth)
+            waveButtonSawtooth.onClick.AddListener(() => ToggleWaveform(AdditiveWaveformType.Sawtooth));
+    }
+
+    // Primer clic en una forma: carga su preset de Fourier y suena en modo
+    // aditivo (aproximada). Segundo clic sobre la misma forma: pasa a la
+    // version directa (formula exacta) para comparar de oido.
+    void ToggleWaveform(AdditiveWaveformType shape)
+    {
+        bool showingAdditivePreset = oscillator.waveform == AdditiveWaveformType.Additive && lastPresetShape == shape;
+
+        if (showingAdditivePreset)
+        {
+            oscillator.waveform = shape;
+        }
+        else
+        {
+            oscillator.LoadPreset(shape, presetHarmonicCount);
+            oscillator.waveform = AdditiveWaveformType.Additive;
+            lastPresetShape = shape;
         }
     }
 
