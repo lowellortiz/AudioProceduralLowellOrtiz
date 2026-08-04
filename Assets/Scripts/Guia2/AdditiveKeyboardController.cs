@@ -1,3 +1,4 @@
+//Codigo escrito por: Lowell Ortiz Mercado
 using UnityEngine;
 using UnityEngine.InputSystem;
 using UnityEngine.UI;
