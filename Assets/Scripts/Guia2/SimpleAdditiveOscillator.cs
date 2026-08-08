@@ -19,7 +19,7 @@ public class SimpleAdditiveOscillator : MonoBehaviour
     public float frequency = 440f;
     public float sampleRate = 44100f;
     public int harmonicCount = 5;
-    public float[] harmonicLevels = { 1f, 0.5f, 0.33f, 0.25f, 0.2f, 0.16f, 0.14f, 0.125f };
+    public float[] harmonicLevels = { 1f, 0.5f, 0.33f, 0.25f, 0.2f, 0.16f, 0.14f, 0.125f, 0.11f, 0.1f };
 
     public bool isPlaying = false;
     public AdditiveWaveformType waveform = AdditiveWaveformType.Additive;
@@ -91,9 +91,9 @@ public class SimpleAdditiveOscillator : MonoBehaviour
     public void LoadPreset(AdditiveWaveformType shape, int harmonics)
     {
         harmonicCount = harmonics;
-        harmonicLevels = new float[harmonics];
+        System.Array.Clear(harmonicLevels, 0, harmonicLevels.Length);
 
-        for (int n = 1; n <= harmonics; n++)
+        for (int n = 1; n <= harmonics && n <= harmonicLevels.Length; n++)
         {
             float value = 0f;
             switch (shape)

@@ -24,6 +24,13 @@ public class AdditiveKeyboardController : MonoBehaviour
     public Button waveButtonSawtooth;
     public int presetHarmonicCount = 8;
 
+    // Slider "Armónicos" (Min 1, Max 10, Whole Numbers) creado en el Canvas.
+    public Slider harmonicSlider;
+
+    // 10 sliders (Min 0, Max 1) en el Canvas: amplitudeSliders[i] controla
+    // harmonicLevels[i], la amplitud del armónico i+1.
+    public Slider[] amplitudeSliders = new Slider[10];
+
     // Recuerda que forma quedo cargada en modo aditivo, para saber si un
     // segundo clic en el mismo boton debe pasar a la version directa.
     private AdditiveWaveformType lastPresetShape = AdditiveWaveformType.Square;
@@ -41,7 +48,7 @@ public class AdditiveKeyboardController : MonoBehaviour
         for (int i = 0; i < noteButtons.Length; i++)
         {
             int index = i;
-            noteButtons[i].onClick.AddListener(() => PlayNote(noteNames[index]));
+            noteButtons[i].onClick.AddListener(() => ToggleNoteButton(noteNames[index]));
         }
 
         if (waveButtonSine)
@@ -55,6 +62,33 @@ public class AdditiveKeyboardController : MonoBehaviour
 
         if (waveButtonSawtooth)
             waveButtonSawtooth.onClick.AddListener(() => ToggleWaveform(AdditiveWaveformType.Sawtooth));
+
+        if (harmonicSlider)
+        {
+            harmonicSlider.onValueChanged.AddListener(HarmonicChange);
+            HarmonicChange(harmonicSlider.value);
+        }
+
+        int sliderCount = Mathf.Min(amplitudeSliders.Length, oscillator.harmonicLevels.Length);
+        for (int i = 0; i < sliderCount; i++)
+        {
+            if (amplitudeSliders[i] == null) continue;
+            int index = i;
+            amplitudeSliders[i].value = oscillator.harmonicLevels[index];
+            amplitudeSliders[i].onValueChanged.AddListener(value => AmplitudeChange(index, value));
+        }
+    }
+
+    // Ajusta cuántos armónicos del array harmonicLevels se suman en AdditiveWave.
+    void HarmonicChange(float value)
+    {
+        oscillator.harmonicCount = Mathf.Clamp((int)value, 1, oscillator.harmonicLevels.Length);
+    }
+
+    // Ajusta la amplitud individual del armónico index+1.
+    void AmplitudeChange(int index, float value)
+    {
+        oscillator.harmonicLevels[index] = value;
     }
 
     // Primer clic en una forma: carga su preset de Fourier y suena en modo
@@ -76,6 +110,10 @@ public class AdditiveKeyboardController : MonoBehaviour
         }
     }
 
+    // Indice (en noteKeys) de la tecla fisica actualmente sostenida, o -1 si
+    // ninguna. Solo esa tecla puede detener el sonido al soltarse.
+    private int activeKeyIndex = -1;
+
     void Update()
     {
         if (Keyboard.current == null)
@@ -85,14 +123,44 @@ public class AdditiveKeyboardController : MonoBehaviour
         for (int i = 0; i < count; i++)
         {
             if (Keyboard.current[noteKeys[i]].wasPressedThisFrame)
+            {
+                activeKeyIndex = i;
                 PlayNote(noteNames[i]);
+            }
+            else if (i == activeKeyIndex && Keyboard.current[noteKeys[i]].wasReleasedThisFrame)
+            {
+                activeKeyIndex = -1;
+                StopNote();
+            }
         }
     }
+
+    // Nota que suena actualmente (via PlayNote), para saber si un boton
+    // pulsado de nuevo debe detenerla en vez de reiniciarla.
+    private string currentNote = null;
 
     void PlayNote(string note)
     {
         oscillator.frequency = GetFrequencyFromOctave0(note, octave);
         oscillator.isPlaying = true;
+        currentNote = note;
+    }
+
+    void StopNote()
+    {
+        oscillator.isPlaying = false;
+        currentNote = null;
+    }
+
+    // Botones en pantalla: primer toque suena la nota, un segundo toque
+    // sobre el mismo boton la detiene (a diferencia del teclado fisico, que
+    // usa presionar/soltar).
+    void ToggleNoteButton(string note)
+    {
+        if (oscillator.isPlaying && currentNote == note)
+            StopNote();
+        else
+            PlayNote(note);
     }
 
     float GetFrequencyFromOctave0(string note, int selectedOctave)
