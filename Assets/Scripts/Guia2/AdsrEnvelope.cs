@@ -20,13 +20,11 @@ public class AdsrEnvelope
 
     public void NoteOn()
     {
-        Debug.Log($"[ADSR] NoteOn() -> stage {Stage} pasa a Attack");
         Stage = AdsrStage.Attack;
     }
 
     public void NoteOff()
     {
-        Debug.Log($"[ADSR] NoteOff() -> stage {Stage} pasa a Release (value={value:F3})");
         releaseStartValue = value;
         Stage = AdsrStage.Release;
     }
@@ -34,8 +32,6 @@ public class AdsrEnvelope
     // Calcula y devuelve el valor instantaneo de la envolvente (0..1).
     public float Process(float dt)
     {
-        AdsrStage previousStage = Stage;
-
         switch (Stage)
         {
             case AdsrStage.Attack:
@@ -61,11 +57,6 @@ public class AdsrEnvelope
                 value = 0f;
                 break;
         }
-
-        // DEBUG TEMPORAL: se llama muestra a muestra, pero solo loguea en
-        // los pocos instantes donde la etapa realmente cambia.
-        if (Stage != previousStage)
-            Debug.Log($"[ADSR] {previousStage} -> {Stage} (value={value:F3})");
 
         return value;
     }

@@ -165,8 +165,7 @@ public class AdditiveKeyboardController : MonoBehaviour
     }
 
     // Indice (en noteNames) de la nota que suena actualmente, o -1 si ninguna.
-    // Lo usa PointerUp para no cortar una nota que ya no le pertenece, y
-    // KeyboardUp para reportar en el log cual se solto.
+    // Lo usa PointerUp para no cortar una nota que ya no le pertenece.
     private int currentNoteIndex = -1;
 
     // Calcula la frecuencia de la nota indiceNota desde la octava 0, la
@@ -176,13 +175,11 @@ public class AdditiveKeyboardController : MonoBehaviour
         oscillator.frequency = GetFrequencyFromOctave0(noteNames[indiceNota], octave);
         oscillator.NoteOn();
         currentNoteIndex = indiceNota;
-        Debug.Log($"[Keyboard] KeyboardDown({indiceNota}) nota={noteNames[indiceNota]} freq={oscillator.frequency:F2}Hz");
     }
 
     // Inicia la liberacion de la ADSR (NoteOff).
     public void KeyboardUp()
     {
-        Debug.Log($"[Keyboard] KeyboardUp() nota={(currentNoteIndex >= 0 ? noteNames[currentNoteIndex] : "ninguna")}");
         oscillator.NoteOff();
         currentNoteIndex = -1;
     }
