@@ -1,5 +1,7 @@
 //Codigo escrito por: Lowell Ortiz Mercado
 using UnityEngine;
+using UnityEngine.Events;
+using UnityEngine.EventSystems;
 using UnityEngine.InputSystem;
 using UnityEngine.UI;
 
@@ -31,6 +33,15 @@ public class AdditiveKeyboardController : MonoBehaviour
     // harmonicLevels[i], la amplitud del armónico i+1.
     public Slider[] amplitudeSliders = new Slider[10];
 
+    // Controles de la envolvente. Ojo con las unidades: attack, decay y release
+    // son TIEMPOS en segundos (cuanto tarda la rampa), mientras que sustain es
+    // un NIVEL 0..1 (a que amplitud se queda mientras se sostiene la tecla).
+    [Header("ADSR")]
+    public Slider attackSlider;
+    public Slider decaySlider;
+    public Slider sustainSlider;
+    public Slider releaseSlider;
+
     // Recuerda que forma quedo cargada en modo aditivo, para saber si un
     // segundo clic en el mismo boton debe pasar a la version directa.
     private AdditiveWaveformType lastPresetShape = AdditiveWaveformType.Square;
@@ -48,7 +59,7 @@ public class AdditiveKeyboardController : MonoBehaviour
         for (int i = 0; i < noteButtons.Length; i++)
         {
             int index = i;
-            noteButtons[i].onClick.AddListener(() => ToggleNoteButton(noteNames[index]));
+            BindNoteButton(noteButtons[i], index);
         }
 
         if (waveButtonSine)
@@ -77,6 +88,24 @@ public class AdditiveKeyboardController : MonoBehaviour
             amplitudeSliders[i].value = oscillator.harmonicLevels[index];
             amplitudeSliders[i].onValueChanged.AddListener(value => AmplitudeChange(index, value));
         }
+
+        BindEnvelopeSlider(attackSlider, oscillator.envelope.attack, value => oscillator.envelope.attack = value);
+        BindEnvelopeSlider(decaySlider, oscillator.envelope.decay, value => oscillator.envelope.decay = value);
+        BindEnvelopeSlider(sustainSlider, oscillator.envelope.sustain, value => oscillator.envelope.sustain = value);
+        BindEnvelopeSlider(releaseSlider, oscillator.envelope.release, value => oscillator.envelope.release = value);
+    }
+
+    // Deja el slider mostrando el valor que ya trae serializado la envolvente y
+    // a partir de ahi escribe cada cambio directo sobre ella. Va en el mismo
+    // sentido que amplitudeSliders (oscilador -> slider al arrancar), asi la
+    // escena sigue siendo la fuente de verdad de los valores iniciales.
+    void BindEnvelopeSlider(Slider slider, float currentValue, UnityAction<float> apply)
+    {
+        if (slider == null)
+            return;
+
+        slider.SetValueWithoutNotify(Mathf.Clamp(currentValue, slider.minValue, slider.maxValue));
+        slider.onValueChanged.AddListener(apply);
     }
 
     // Ajusta cuántos armónicos del array harmonicLevels se suman en AdditiveWave.
@@ -125,42 +154,67 @@ public class AdditiveKeyboardController : MonoBehaviour
             if (Keyboard.current[noteKeys[i]].wasPressedThisFrame)
             {
                 activeKeyIndex = i;
-                PlayNote(noteNames[i]);
+                KeyboardDown(i);
             }
             else if (i == activeKeyIndex && Keyboard.current[noteKeys[i]].wasReleasedThisFrame)
             {
                 activeKeyIndex = -1;
-                StopNote();
+                KeyboardUp();
             }
         }
     }
 
-    // Nota que suena actualmente (via PlayNote), para saber si un boton
-    // pulsado de nuevo debe detenerla en vez de reiniciarla.
-    private string currentNote = null;
+    // Indice (en noteNames) de la nota que suena actualmente, o -1 si ninguna.
+    // Lo usa PointerUp para no cortar una nota que ya no le pertenece, y
+    // KeyboardUp para reportar en el log cual se solto.
+    private int currentNoteIndex = -1;
 
-    void PlayNote(string note)
+    // Calcula la frecuencia de la nota indiceNota desde la octava 0, la
+    // asigna al oscilador y dispara el ataque de la ADSR (NoteOn).
+    public void KeyboardDown(int indiceNota)
     {
-        oscillator.frequency = GetFrequencyFromOctave0(note, octave);
-        oscillator.isPlaying = true;
-        currentNote = note;
+        oscillator.frequency = GetFrequencyFromOctave0(noteNames[indiceNota], octave);
+        oscillator.NoteOn();
+        currentNoteIndex = indiceNota;
+        Debug.Log($"[Keyboard] KeyboardDown({indiceNota}) nota={noteNames[indiceNota]} freq={oscillator.frequency:F2}Hz");
     }
 
-    void StopNote()
+    // Inicia la liberacion de la ADSR (NoteOff).
+    public void KeyboardUp()
     {
-        oscillator.isPlaying = false;
-        currentNote = null;
+        Debug.Log($"[Keyboard] KeyboardUp() nota={(currentNoteIndex >= 0 ? noteNames[currentNoteIndex] : "ninguna")}");
+        oscillator.NoteOff();
+        currentNoteIndex = -1;
     }
 
-    // Botones en pantalla: primer toque suena la nota, un segundo toque
-    // sobre el mismo boton la detiene (a diferencia del teclado fisico, que
-    // usa presionar/soltar).
-    void ToggleNoteButton(string note)
+    // Los botones del piano NO usan onClick: ese evento solo se dispara al
+    // completar el clic (bajar y soltar), asi que nunca informa el momento de
+    // soltar y la nota se quedaba sonando en Sustain para siempre. Con
+    // PointerDown/PointerUp el boton se comporta igual que una tecla fisica:
+    // suena mientras se mantenga oprimido y libera la ADSR al soltar.
+    void BindNoteButton(Button button, int indiceNota)
     {
-        if (oscillator.isPlaying && currentNote == note)
-            StopNote();
-        else
-            PlayNote(note);
+        if (button == null)
+            return;
+
+        var trigger = button.GetComponent<EventTrigger>();
+        if (trigger == null)
+            trigger = button.gameObject.AddComponent<EventTrigger>();
+
+        var down = new EventTrigger.Entry { eventID = EventTriggerType.PointerDown };
+        down.callback.AddListener(_ => KeyboardDown(indiceNota));
+        trigger.triggers.Add(down);
+
+        // Solo suelta si la nota que suena es la suya: si mientras se sostiene
+        // este boton se dispara otra nota (teclado fisico u otro boton), soltar
+        // este ya no debe cortar la que quedo sonando.
+        var up = new EventTrigger.Entry { eventID = EventTriggerType.PointerUp };
+        up.callback.AddListener(_ =>
+        {
+            if (currentNoteIndex == indiceNota)
+                KeyboardUp();
+        });
+        trigger.triggers.Add(up);
     }
 
     float GetFrequencyFromOctave0(string note, int selectedOctave)
