@@ -29,28 +29,23 @@ public class SimpleAdditiveOscillator : MonoBehaviour
     [Header("ADSR")]
     public AdsrEnvelope envelope = new AdsrEnvelope();
 
-    public bool isPlaying => envelope.Stage != AdsrStage.Idle;
+    public bool isPlaying => envelope.IsActive;
 
-    // Fase normalizada del oscilador: 0..1 equivale a un ciclo completo.
-    // Se ACUMULA muestra a muestra en vez de calcularse con la formula absoluta
-    // f*n/sampleRate. Dos motivos:
-    //   1) Cambiar 'frequency' a mitad de nota ya no teletransporta la fase, que
-    //      era lo que producia el click al cambiar de nota con el piano. Ese
-    //      click tapaba por completo un ataque de 10 ms.
-    //   2) 'n' crecia sin limite y el float se quedaba sin mantisa: a los pocos
-    //      minutos la onda se degradaba (peor todavia en los armonicos altos,
-    //      que multiplican n por hasta 10).
+    // Fase normalizada: 0..1 equivale a un ciclo completo. Se ACUMULA muestra a
+    // muestra, asi cambiar 'frequency' a mitad de nota no teletransporta la fase
+    // (era el click al cambiar de nota).
     private double phase = 0.0;
 
     void Awake()
     {
         sampleRate = AudioSettings.outputSampleRate;
 
-        // Sin un AudioClip asignado, el AudioSource nunca queda "reproduciendo"
-        // y OnAudioFilterRead no se llama (Play On Awake no alcanza). Se le da
-        // un clip corto y silencioso en loop solo para activar el pipeline de
-        // audio; su contenido no importa porque OnAudioFilterRead sobreescribe
-        // cada muestra con la señal generada.
+        // La envolvente convierte milisegundos a muestras, asi que necesita la
+        // frecuencia real de salida. Se inyecta ANTES del Play().
+        envelope.SetSampleRate(sampleRate);
+
+        // Sin un AudioClip asignado, OnAudioFilterRead no se llama. El clip
+        // silencioso solo activa el pipeline: cada muestra se sobreescribe.
         var audioSource = GetComponent<AudioSource>();
         if (audioSource.clip == null)
         {
@@ -72,6 +67,7 @@ public class SimpleAdditiveOscillator : MonoBehaviour
         return Mathf.Sin(2f * Mathf.PI * (float)wrapped);
     }
 
+    // Sintesis aditiva: suma de los armonicos ponderados por harmonicLevels.
     float AdditiveWave(double normalizedPhase)
     {
         float sum = 0f;
@@ -89,7 +85,7 @@ public class SimpleAdditiveOscillator : MonoBehaviour
         return totalLevel > 0f ? sum / totalLevel : 0f;
     }
 
-    // Version directa (formula exacta, sin armonicos) de la misma onda, para
+    // Version directa (formula exacta, sin armonicos) de la misma onda.
     float DirectWave(AdditiveWaveformType type, double normalizedPhase)
     {
         float p = (float)(normalizedPhase - System.Math.Floor(normalizedPhase));
@@ -97,8 +93,6 @@ public class SimpleAdditiveOscillator : MonoBehaviour
         switch (type)
         {
             case AdditiveWaveformType.Square:
-                // Comparacion directa: mismo resultado que Mathf.Sign(Mathf.Sin(..))
-                // pero sin calcular un seno solo para quedarse con su signo.
                 return p < 0.5f ? 1f : -1f;
 
             case AdditiveWaveformType.Triangle:
@@ -155,26 +149,27 @@ public class SimpleAdditiveOscillator : MonoBehaviour
         }
     }
 
+    // Seccion 8.5 de la guia: se genera la muestra del oscilador, se multiplica
+    // por la envolvente y el resultado se escribe en el buffer.
     void OnAudioFilterRead(float[] data, int channels)
     {
-        float dt = 1f / sampleRate;
+        // Nota terminada: silencio explicito.
+        if (!envelope.IsActive)
+        {
+            System.Array.Clear(data, 0, data.Length);
+            return;
+        }
 
-        // Copia local: el hilo principal puede cambiar 'frequency' a mitad de
-        // buffer, asi al menos este bloque queda coherente consigo mismo.
         double phaseStep = frequency / sampleRate;
 
         for (int i = 0; i < data.Length; i += channels)
         {
-            // Se mira la etapa antes y despues para detectar el flanco
-            // Idle -> Attack. Ambas lecturas son de este mismo hilo, asi que
-            // son exactas y gratis (no hace falta sincronizar nada).
-            AdsrStage previousStage = envelope.Stage;
-            float env = envelope.Process(dt);
-
-            // Unico punto donde reiniciar la fase es inaudible: la nota arranca
-            // desde silencio, asi que en ese instante la amplitud vale ~0.
-            if (previousStage == AdsrStage.Idle && envelope.Stage == AdsrStage.Attack)
+            // TimeIndex vale 0 solo en la primera muestra de la nota: reinicia
+            // la fase una vez por nota, cuando la envolvente vale ~0.
+            if (envelope.TimeIndex == 0)
                 phase = 0.0;
+
+            float env = envelope.GetAdsr(envelope.TimeIndex);
 
             float sample = Mathf.Clamp(amplitude * env * GetSample(phase), -1f, 1f);
 
@@ -184,6 +179,8 @@ public class SimpleAdditiveOscillator : MonoBehaviour
             phase += phaseStep;
             if (phase >= 1.0)
                 phase -= System.Math.Floor(phase);
+
+            envelope.AdvanceTime();
         }
     }
 }

@@ -1,0 +1,34 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 3509c7697b8ae1e468a4c39d12074355, type: 3}
+  m_Name: Piano
+  m_EditorClassIdentifier: Assembly-CSharp::InstrumentPreset
+  displayName: Piano
+  f0: 219.87419
+  harmonicLevels:
+  - 1
+  - 0.778762
+  - 0.209595
+  - 0.336845
+  - 0.088286
+  - 0.499561
+  - 0.103904
+  - 0.002228
+  - 0.000619
+  - 0.0005
+  harmonicCount: 10
+  A: 67.324265
+  D: 623.58276
+  S: 2658.254
+  SL: 0.05
+  R: 0
+  amplitude: 0.25

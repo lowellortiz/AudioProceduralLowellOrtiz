@@ -33,14 +33,20 @@ public class AdditiveKeyboardController : MonoBehaviour
     // harmonicLevels[i], la amplitud del armónico i+1.
     public Slider[] amplitudeSliders = new Slider[10];
 
-    // Controles de la envolvente. Ojo con las unidades: attack, decay y release
-    // son TIEMPOS en segundos (cuanto tarda la rampa), mientras que sustain es
-    // un NIVEL 0..1 (a que amplitud se queda mientras se sostiene la tecla).
-    [Header("ADSR")]
-    public Slider attackSlider;
-    public Slider decaySlider;
-    public Slider sustainSlider;
-    public Slider releaseSlider;
+    // Ojo con las unidades: A, D, S y R son TIEMPOS en milisegundos, mientras
+    // que sustainSlider es el NIVEL SL, un 0..1.
+    [Header("ADSR (tiempos en ms)")]
+    public Slider attackSlider;        // A  : ms
+    public Slider decaySlider;         // D  : ms
+    public Slider sustainTimeSlider;   // S  : ms  (duracion del sostenido)
+    public Slider sustainSlider;       // SL : nivel 0..1
+    public Slider releaseSlider;       // R  : ms
+
+    // Cada asset trae la f0, los 10 armonicos normalizados y la ADSR del
+    // analisis en Python. El boton i carga el preset i: mismo orden en ambos.
+    [Header("Presets de instrumento")]
+    public InstrumentPreset[] instrumentPresets;
+    public Button[] instrumentButtons;
 
     // Recuerda que forma quedo cargada en modo aditivo, para saber si un
     // segundo clic en el mismo boton debe pasar a la version directa.
@@ -89,23 +95,114 @@ public class AdditiveKeyboardController : MonoBehaviour
             amplitudeSliders[i].onValueChanged.AddListener(value => AmplitudeChange(index, value));
         }
 
-        BindEnvelopeSlider(attackSlider, oscillator.envelope.attack, value => oscillator.envelope.attack = value);
-        BindEnvelopeSlider(decaySlider, oscillator.envelope.decay, value => oscillator.envelope.decay = value);
-        BindEnvelopeSlider(sustainSlider, oscillator.envelope.sustain, value => oscillator.envelope.sustain = value);
-        BindEnvelopeSlider(releaseSlider, oscillator.envelope.release, value => oscillator.envelope.release = value);
+        BindEnvelopeSlider(attackSlider, oscillator.envelope.A, value => oscillator.envelope.A = value);
+        BindEnvelopeSlider(decaySlider, oscillator.envelope.D, value => oscillator.envelope.D = value);
+        BindEnvelopeSlider(sustainTimeSlider, oscillator.envelope.S, value => oscillator.envelope.S = value);
+        BindEnvelopeSlider(sustainSlider, oscillator.envelope.SL, value => oscillator.envelope.SL = value);
+        BindEnvelopeSlider(releaseSlider, oscillator.envelope.R, value => oscillator.envelope.R = value);
+
+        BindPresetButtons();
     }
 
-    // Deja el slider mostrando el valor que ya trae serializado la envolvente y
-    // a partir de ahi escribe cada cambio directo sobre ella. Va en el mismo
-    // sentido que amplitudeSliders (oscilador -> slider al arrancar), asi la
-    // escena sigue siendo la fuente de verdad de los valores iniciales.
+    // Deja el slider mostrando el valor serializado en la envolvente y a partir
+    // de ahi escribe cada cambio directo sobre ella.
     void BindEnvelopeSlider(Slider slider, float currentValue, UnityAction<float> apply)
     {
         if (slider == null)
             return;
 
+        // Si el rango del slider no cubre el valor, UI y envolvente quedan
+        // desincronizadas en silencio: mejor que se vea en la consola.
+        if (currentValue < slider.minValue || currentValue > slider.maxValue)
+        {
+            Debug.LogWarning(
+                $"[ADSR] '{slider.name}': el valor {currentValue} esta fuera del rango " +
+                $"[{slider.minValue}, {slider.maxValue}]. Revisa Min/Max en el Inspector " +
+                "(los tiempos ahora estan en milisegundos, no en segundos).", slider);
+        }
+
         slider.SetValueWithoutNotify(Mathf.Clamp(currentValue, slider.minValue, slider.maxValue));
         slider.onValueChanged.AddListener(apply);
+    }
+
+    void BindPresetButtons()
+    {
+        if (instrumentButtons == null)
+            return;
+
+        for (int i = 0; i < instrumentButtons.Length; i++)
+        {
+            if (instrumentButtons[i] == null) continue;
+            if (instrumentPresets == null || i >= instrumentPresets.Length) continue;
+            if (instrumentPresets[i] == null) continue;
+
+            int index = i;
+            instrumentButtons[i].onClick.AddListener(() => ApplyPreset(instrumentPresets[index]));
+        }
+    }
+
+    // Vuelca el preset sobre el oscilador y DESPUES refleja el resultado en la
+    // UI. La direccion es siempre modelo -> UI y nunca al reves.
+    public void ApplyPreset(InstrumentPreset preset)
+    {
+        if (preset == null || oscillator == null)
+            return;
+        oscillator.NoteOff();
+
+        oscillator.waveform = AdditiveWaveformType.Additive;
+        oscillator.amplitude = preset.amplitude;
+
+        int count = Mathf.Min(preset.harmonicLevels.Length, oscillator.harmonicLevels.Length);
+        for (int i = 0; i < count; i++)
+            oscillator.harmonicLevels[i] = preset.harmonicLevels[i];
+
+        oscillator.harmonicCount = Mathf.Clamp(preset.harmonicCount, 1, oscillator.harmonicLevels.Length);
+
+        oscillator.envelope.A = preset.A;
+        oscillator.envelope.D = preset.D;
+        oscillator.envelope.S = preset.S;
+        oscillator.envelope.SL = preset.SL;
+        oscillator.envelope.R = preset.R;
+
+        octave = OctaveFromFrequency(preset.f0);
+
+        RefreshUiFromOscillator();
+    }
+
+    // Empuja el estado del oscilador a los sliders sin disparar sus callbacks.
+    void RefreshUiFromOscillator()
+    {
+        if (harmonicSlider)
+            harmonicSlider.SetValueWithoutNotify(oscillator.harmonicCount);
+
+        int count = Mathf.Min(amplitudeSliders.Length, oscillator.harmonicLevels.Length);
+        for (int i = 0; i < count; i++)
+        {
+            if (amplitudeSliders[i] == null) continue;
+            amplitudeSliders[i].SetValueWithoutNotify(oscillator.harmonicLevels[i]);
+        }
+
+        SetSliderSilently(attackSlider, oscillator.envelope.A);
+        SetSliderSilently(decaySlider, oscillator.envelope.D);
+        SetSliderSilently(sustainTimeSlider, oscillator.envelope.S);
+        SetSliderSilently(sustainSlider, oscillator.envelope.SL);
+        SetSliderSilently(releaseSlider, oscillator.envelope.R);
+    }
+
+    void SetSliderSilently(Slider slider, float value)
+    {
+        if (slider == null)
+            return;
+
+        if (value < slider.minValue || value > slider.maxValue)
+        {
+            Debug.LogWarning(
+                $"[Preset] '{slider.name}' no cubre el valor {value} " +
+                $"([{slider.minValue}, {slider.maxValue}]): el preset se aplico igual, " +
+                "pero el slider queda mintiendo. Amplia el rango en el Inspector.", slider);
+        }
+
+        slider.SetValueWithoutNotify(Mathf.Clamp(value, slider.minValue, slider.maxValue));
     }
 
     // Ajusta cuántos armónicos del array harmonicLevels se suman en AdditiveWave.
@@ -184,11 +281,9 @@ public class AdditiveKeyboardController : MonoBehaviour
         currentNoteIndex = -1;
     }
 
-    // Los botones del piano NO usan onClick: ese evento solo se dispara al
-    // completar el clic (bajar y soltar), asi que nunca informa el momento de
-    // soltar y la nota se quedaba sonando en Sustain para siempre. Con
-    // PointerDown/PointerUp el boton se comporta igual que una tecla fisica:
-    // suena mientras se mantenga oprimido y libera la ADSR al soltar.
+    // Los botones del piano NO usan onClick: ese evento nunca informa el momento
+    // de soltar. Con PointerDown/PointerUp el boton se comporta como una tecla
+    // fisica: suena mientras se mantenga oprimido y libera la ADSR al soltar.
     void BindNoteButton(Button button, int indiceNota)
     {
         if (button == null)
@@ -202,9 +297,7 @@ public class AdditiveKeyboardController : MonoBehaviour
         down.callback.AddListener(_ => KeyboardDown(indiceNota));
         trigger.triggers.Add(down);
 
-        // Solo suelta si la nota que suena es la suya: si mientras se sostiene
-        // este boton se dispara otra nota (teclado fisico u otro boton), soltar
-        // este ya no debe cortar la que quedo sonando.
+        // Solo suelta si la nota que suena es la suya.
         var up = new EventTrigger.Entry { eventID = EventTriggerType.PointerUp };
         up.callback.AddListener(_ =>
         {
@@ -212,6 +305,19 @@ public class AdditiveKeyboardController : MonoBehaviour
                 KeyboardUp();
         });
         trigger.triggers.Add(up);
+    }
+
+    // Octava del teclado en la que cae la f0 del preset. Se usa la parte ENTERA
+    // del logaritmo, no el redondeo (A4 = 440 Hz da 4.75 y debe quedar en 4).
+    // El epsilon evita que un C exacto, redondeado a dos decimales, caiga en la
+    // octava de abajo.
+    int OctaveFromFrequency(float frequencyHz)
+    {
+        if (frequencyHz <= 0f)
+            return octave;
+
+        float octavesOverC0 = Mathf.Log(frequencyHz / 16.3516f, 2f);
+        return Mathf.Clamp(Mathf.FloorToInt(octavesOverC0 + 0.01f), 0, 8);
     }
 
     float GetFrequencyFromOctave0(string note, int selectedOctave)
