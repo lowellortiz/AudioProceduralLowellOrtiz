@@ -29,6 +29,34 @@ public class SimpleAdditiveOscillator : MonoBehaviour
     [Header("ADSR")]
     public AdsrEnvelope envelope = new AdsrEnvelope();
 
+    // Guia 4. La wavetable NO es una sexta forma de onda: es otra manera de
+    // LEER la que ya esta elegida. Con useWavetable en false el oscilador
+    // calcula cada muestra como siempre; en true lee un periodo pregrabado.
+    // Asi se puede comparar A/B el mismo sonido por los dos caminos.
+    [Header("Wavetable (Guia 4)")]
+    public bool useWavetable = false;
+
+    [Tooltip("Interpolacion lineal entre las dos muestras vecinas (seccion 5). " +
+             "Apagarla con una tabla pequena hace audible el escalonamiento.")]
+    public bool interpolate = true;
+
+    [Tooltip("Cuantas muestras describen el periodo almacenado.")]
+    public int wavetableSize = 1024;
+
+    public WavetableSourceMode tableSource = WavetableSourceMode.Calculated;
+
+    [Tooltip("Los .txt de Guia4/Wavetables, en el orden en que aparecen en el menu.")]
+    public TextAsset[] wavetableFiles;
+
+    public int wavetableFileIndex = 0;
+
+    [Tooltip("Fuente alternativa: se extrae un periodo del clip (seccion 6).")]
+    public AudioClip wavetableClip;
+
+    private readonly Wavetable wavetable = new Wavetable();
+
+    public bool WavetableReady => wavetable.IsReady;
+
     public bool isPlaying => envelope.IsActive;
 
     // Fase normalizada: 0..1 equivale a un ciclo completo. Se ACUMULA muestra a
@@ -55,6 +83,10 @@ public class SimpleAdditiveOscillator : MonoBehaviour
 
         if (!audioSource.isPlaying)
             audioSource.Play();
+
+        // La tabla se deja lista antes del primer callback de audio: si no,
+        // la primera nota con useWavetable saldria en silencio.
+        RebuildWavetable();
     }
 
     public void NoteOn() => envelope.NoteOn();
@@ -106,7 +138,8 @@ public class SimpleAdditiveOscillator : MonoBehaviour
         }
     }
 
-    float GetSample(double normalizedPhase)
+    // La onda calculada muestra a muestra: el camino de las guias anteriores.
+    float GetSampleDirect(double normalizedPhase)
     {
         if (waveform == AdditiveWaveformType.Additive)
             return AdditiveWave(normalizedPhase);
@@ -117,7 +150,93 @@ public class SimpleAdditiveOscillator : MonoBehaviour
         return DirectWave(waveform, normalizedPhase);
     }
 
-    // Carga en harmonicLevels los pesos de Fourier que aproximan la forma
+    // Lo unico que decide la Guia 4: calcular la muestra o leerla de la tabla.
+    float GetSample(double normalizedPhase)
+    {
+        if (useWavetable && wavetable.IsReady)
+            return wavetable.Read(normalizedPhase, interpolate);
+
+        return GetSampleDirect(normalizedPhase);
+    }
+
+    // Seccion 8: un solo metodo decide de donde salen las muestras del periodo.
+    // Lo llama la UI cada vez que cambia algo que afecta a la tabla (la forma,
+    // los armonicos, el tamano o la fuente); el callback de audio nunca lo llama.
+    public void RebuildWavetable()
+    {
+        int size = Mathf.Clamp(wavetableSize, 2, 8192);
+
+        switch (tableSource)
+        {
+            case WavetableSourceMode.TextFile:
+                BuildTableFromTextFile(size);
+                break;
+
+            case WavetableSourceMode.AudioClip:
+                BuildTableFromClip(size);
+                break;
+
+            default:
+                // La tabla se llena con la onda que el usuario tenga elegida,
+                // armonicos incluidos. Por eso con 'Calculada' el toggle de
+                // wavetable no deberia cambiar el timbre: es la misma onda.
+                wavetable.BuildFromGenerator(GetSampleDirect, size);
+                break;
+        }
+    }
+
+    void BuildTableFromTextFile(int size)
+    {
+        if (wavetableFiles == null ||
+            wavetableFileIndex < 0 || wavetableFileIndex >= wavetableFiles.Length ||
+            wavetableFiles[wavetableFileIndex] == null)
+        {
+            Debug.LogWarning("[Wavetable] No hay TextAsset en el indice " + wavetableFileIndex +
+                             ". Se vuelve a la tabla calculada.", this);
+            wavetable.BuildFromGenerator(GetSampleDirect, size);
+            return;
+        }
+
+        float[] muestras = WavetableTxtLoader.Parse(wavetableFiles[wavetableFileIndex].text);
+
+        if (muestras == null || muestras.Length == 0)
+        {
+            Debug.LogWarning("[Wavetable] '" + wavetableFiles[wavetableFileIndex].name +
+                             "' no trajo muestras validas.", this);
+            wavetable.BuildFromGenerator(GetSampleDirect, size);
+            return;
+        }
+
+        // El archivo trae 1024 muestras; si el tamano pedido es otro, aqui se
+        // remuestrea (mas chico = menos detalle, seccion 3.1).
+        wavetable.BuildFromSamples(muestras, size);
+    }
+
+    // Seccion 6/9: se toma un periodo del clip. Solo el primer canal, porque la
+    // tabla es monofonica.
+    void BuildTableFromClip(int size)
+    {
+        if (wavetableClip == null)
+        {
+            Debug.LogWarning("[Wavetable] No hay AudioClip asignado. Se vuelve a la tabla calculada.", this);
+            wavetable.BuildFromGenerator(GetSampleDirect, size);
+            return;
+        }
+
+        var clipData = new float[wavetableClip.samples * wavetableClip.channels];
+        wavetableClip.GetData(clipData, 0);
+
+        var mono = new float[wavetableClip.samples];
+        for (int i = 0; i < mono.Length; i++)
+            mono[i] = clipData[i * wavetableClip.channels];
+
+        wavetable.BuildFromSamples(mono, size);
+    }
+
+    // Carga en harmonicLevels los pesos de Fourier que aproximan la forma.
+    // Los botones de onda ya NO la llaman (cada uno solo elige el generador y
+    // deja los armonicos donde esten), pero se conserva por si se quiere cargar
+    // una aproximacion a mano desde el Inspector o desde otro script.
     public void LoadPreset(AdditiveWaveformType shape, int harmonics)
     {
         harmonicCount = harmonics;
